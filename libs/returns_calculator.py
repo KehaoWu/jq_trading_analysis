@@ -1,12 +1,98 @@
 """
 收益率计算模块
 
-该模块提供了根据日收益率计算累积收益率的功能，以及将日收益率导出为CSV的功能。
-"""
+该模块提供了根据日收益率计算累积收益率的功能，以及将日收益率导出为CSV的功能。"""
 
 import pandas as pd
-from typing import List, Dict, Optional, Union
+from typing import List, Dict, Optional, Union, Tuple
 import os
+import numpy as np
+from datetime import datetime
+
+# 时间区间定义 (开始日期, 结束日期)
+TIME_INTERVALS = {
+    # 牛市期间
+    "13-15年牛市": [
+        ("2013-06-28", "2015-06-12"),  # 牛市期间
+    ],
+    
+    # 熊市期间
+    "15年熊市": [
+        ("2015-06-12", "2015-09-18"),  # 熊市期间
+    ],
+    
+    # 熔断区间
+    "15-16年熔断": [
+        ("2015-12-28", "2016-01-28"),  # 熔断区间
+    ],
+    
+    # 大票风格区间
+    "17-18年大票": [
+        ("2017-01-01", "2018-01-25"),  # 大票风格区间
+    ],
+    
+    # 抱团风格区间
+    "20-21年抱团": [
+        ("2020-07-10", "2021-02-18"),  # 抱团风格区间
+    ],
+}
+
+
+def filter_data_by_time_intervals(
+    dates: List[str], 
+    daily_returns: List[float], 
+    cumulative_returns: List[float],
+    interval_name: str
+) -> Tuple[List[str], List[float], List[float]]:
+    """
+    根据时间区间过滤数据
+    
+    Args:
+        dates: 日期列表
+        daily_returns: 日收益率列表
+        cumulative_returns: 累积收益率列表
+        interval_name: 时间区间名称
+        
+    Returns:
+        Tuple[List[str], List[float], List[float]]: 过滤后的日期、日收益率、累积收益率
+    """
+    if interval_name not in TIME_INTERVALS:
+        return [], [], []
+    
+    filtered_dates = []
+    filtered_daily_returns = []
+    filtered_cumulative_returns = []
+    
+    # 获取时间区间
+    intervals = TIME_INTERVALS[interval_name]
+    
+    for i, date_str in enumerate(dates):
+        # 统一日期格式处理
+        if len(date_str) == 8 and date_str.isdigit():  # YYYYMMDD格式
+            try:
+                date_obj = datetime.strptime(date_str, '%Y%m%d')
+            except:
+                continue
+        elif len(date_str) == 10 and '-' in date_str:  # YYYY-MM-DD格式
+            try:
+                date_obj = datetime.strptime(date_str, '%Y-%m-%d')
+            except:
+                continue
+        else:
+            continue
+        
+        # 检查是否在任何一个时间区间内
+        for start_date_str, end_date_str in intervals:
+            start_date = datetime.strptime(start_date_str, '%Y-%m-%d')
+            end_date = datetime.strptime(end_date_str, '%Y-%m-%d')
+            
+            if start_date <= date_obj <= end_date:
+                filtered_dates.append(date_str)
+                filtered_daily_returns.append(daily_returns[i])
+                filtered_cumulative_returns.append(cumulative_returns[i])
+                break
+    
+    return filtered_dates, filtered_daily_returns, filtered_cumulative_returns
 
 
 def calculate_daily_returns(
@@ -168,6 +254,37 @@ def calculate_cumulative_returns(
     return cumulative_values[1:]
 
 
+def _parse_date_string(date_str: str) -> datetime:
+    """
+    解析日期字符串，支持多种格式
+    
+    Args:
+        date_str: 日期字符串，支持YYYYMMDD或YYYY-MM-DD格式
+        
+    Returns:
+        datetime: 解析后的日期对象
+        
+    Raises:
+        ValueError: 如果日期格式不支持
+    """
+    from datetime import datetime
+    
+    # 尝试解析YYYYMMDD格式
+    try:
+        return datetime.strptime(date_str, '%Y%m%d')
+    except ValueError:
+        pass
+    
+    # 尝试解析YYYY-MM-DD格式
+    try:
+        return datetime.strptime(date_str, '%Y-%m-%d')
+    except ValueError:
+        pass
+    
+    # 如果都失败，抛出异常
+    raise ValueError(f"不支持的日期格式: {date_str}，支持的格式: YYYYMMDD 或 YYYY-MM-DD")
+
+
 def calculate_annualized_return(
     daily_returns: List[float],
     trading_days: int = 252,
@@ -177,11 +294,16 @@ def calculate_annualized_return(
     """
     计算年化收益率
     
+    使用复利基础的精确计算方法：
+    1. 计算总收益率：期末资产 / 期初资产
+    2. 计算日化收益率：总收益率 ^ (1/天数) - 1
+    3. 计算年化收益率：(1 + 日化收益率) ^ 365 - 1
+    
     Args:
         daily_returns: 日收益率列表（百分比形式，如1.5表示1.5%）
         trading_days: 一年中的交易日数量，默认为252
-        start_date: 开始日期（YYYYMMDD格式），用于计算实际年数
-        end_date: 结束日期（YYYYMMDD格式），用于计算实际年数
+        start_date: 开始日期（YYYYMMDD或YYYY-MM-DD格式），用于计算实际年数
+        end_date: 结束日期（YYYYMMDD或YYYY-MM-DD格式），用于计算实际年数
         
     Returns:
         float: 年化收益率（百分比形式）
@@ -194,34 +316,56 @@ def calculate_annualized_return(
     if not daily_returns:
         return 0.0
     
-    # 计算累积收益率
-    cumulative_values = calculate_cumulative_returns(daily_returns)
-    if not cumulative_values:
-        return 0.0
+    # 直接计算累积价值
+    period_start_value = 100.0  # 期初资产价值（基准值）
+    current_value = period_start_value
     
-    # 获取最终累积收益率
-    final_cumulative_return = (cumulative_values[-1] - 100.0) / 100.0  # 转换为小数
+    for daily_return in daily_returns:
+        # 将百分比转换为小数
+        return_rate = daily_return / 100.0
+        # 计算累积值
+        current_value = current_value * (1 + return_rate)
     
-    # 计算年数
+    # 计算总收益率（期末资产 / 期初资产）
+    period_end_value = current_value  # 期末资产价值
+    total_return_ratio = period_end_value / period_start_value  # 总收益率比值
+    
+    # 计算实际天数
+    actual_days = len(daily_returns)
     if start_date and end_date:
-        # 使用实际日期计算年数（聚宽标准）
-        from datetime import datetime
+        # 使用实际日期计算天数
         try:
-            start_dt = datetime.strptime(start_date, '%Y%m%d')
-            end_dt = datetime.strptime(end_date, '%Y%m%d')
-            total_days = (end_dt - start_dt).days
-            years = total_days / 365.25  # 考虑闰年
-        except:
-            # 如果日期解析失败，回退到交易日计算
-            years = len(daily_returns) / trading_days
-    else:
-        # 使用交易日计算年数
-        years = len(daily_returns) / trading_days
+            start_dt = _parse_date_string(start_date)
+            end_dt = _parse_date_string(end_date)
+            actual_days = (end_dt - start_dt).days
+            if actual_days <= 0:
+                actual_days = len(daily_returns)
+        except (ValueError, Exception):
+            # 如果日期解析失败，使用交易日数量
+            actual_days = len(daily_returns)
     
-    if years == 0:
+    if actual_days == 0:
         return 0.0
     
-    annualized_return = (1 + final_cumulative_return) ** (1 / years) - 1
+    # 处理负收益率或零收益率的情况
+    if total_return_ratio <= 0:
+        # 对于极端负收益率，使用绝对值计算后取负值
+        abs_ratio = abs(total_return_ratio)
+        if abs_ratio == 0:
+            return -100.0  # 完全亏损
+        daily_return_rate = abs_ratio ** (1 / actual_days) - 1
+        annualized_return = (1 + daily_return_rate) ** 365 - 1
+        return -annualized_return * 100  # 返回负值
+    
+    # 正常情况：计算日化收益率（复利基础）
+    daily_return_rate = total_return_ratio ** (1 / actual_days) - 1
+    
+    # 计算年化收益率：(1 + 日化收益率) ^ 365 - 1
+    annualized_return = (1 + daily_return_rate) ** 365 - 1
+    
+    # 处理复数结果
+    if isinstance(annualized_return, complex):
+        annualized_return = annualized_return.real
     
     # 转换为百分比
     return annualized_return * 100
@@ -241,8 +385,8 @@ def calculate_sharpe_ratio(
         daily_returns: 日收益率列表（百分比形式，如1.5表示1.5%）
         risk_free_rate: 无风险利率（年化，百分比形式），默认为3.0%
         trading_days: 一年中的交易日数量，默认为252
-        start_date: 开始日期（YYYYMMDD格式），用于计算实际年数
-        end_date: 结束日期（YYYYMMDD格式），用于计算实际年数
+        start_date: 开始日期（YYYYMMDD或YYYY-MM-DD格式），用于计算实际年数
+        end_date: 结束日期（YYYYMMDD或YYYY-MM-DD格式），用于计算实际年数
         
     Returns:
         float: 夏普比率

@@ -430,6 +430,120 @@ class StatisticsCalculator:
             'sharpe_ratio': round(sharpe_ratio, 4),
             'trading_days': len(daily_returns)
         }
+    
+    def calculate_time_interval_statistics(self, daily_returns: List[float], cumulative_returns: List[float], 
+                                         name: str, data_type: str, dates: List[str] = None) -> List[Dict[str, float]]:
+        """
+        计算特殊时间区间的统计指标
+        
+        Args:
+            daily_returns: 日收益率列表（百分比形式）
+            cumulative_returns: 累积收益率列表（百分比形式）
+            name: 数据名称
+            data_type: 数据类型（backtest, hedge, index）
+            dates: 日期列表（可选）
+            
+        Returns:
+            List[Dict]: 包含各时间区间统计指标的列表
+        """
+        from libs.returns_calculator import TIME_INTERVALS, filter_data_by_time_intervals
+        
+        interval_statistics = []
+        
+        if not daily_returns or not cumulative_returns or not dates:
+            return interval_statistics
+        
+        # 为每个时间区间计算统计指标
+        for interval_name in TIME_INTERVALS.keys():
+            # 过滤数据
+            filtered_dates, filtered_daily_returns, filtered_cumulative_returns = filter_data_by_time_intervals(
+                dates, daily_returns, cumulative_returns, interval_name
+            )
+            
+            if not filtered_dates or not filtered_daily_returns or not filtered_cumulative_returns:
+                # 如果该时间区间没有数据，创建空记录
+                interval_statistics.append({
+                    'name': f"{name}_{interval_name}",
+                    'type': data_type,
+                    'interval': interval_name,
+                    'total_return': 0.0,
+                    'annualized_return': 0.0,
+                    'max_drawdown': 0.0,
+                    'max_drawdown_start_date': '',
+                    'max_drawdown_end_date': '',
+                    'sharpe_ratio': 0.0,
+                    'trading_days': 0
+                })
+                continue
+            
+            # 计算区间收益率（总收益率）
+            total_return = filtered_cumulative_returns[-1] if filtered_cumulative_returns else 0.0
+            
+            # 获取开始和结束日期
+            start_date = filtered_dates[0] if filtered_dates else None
+            end_date = filtered_dates[-1] if filtered_dates else None
+            
+            # 计算年化收益率
+            print(len(filtered_cumulative_returns), start_date, end_date)
+            annualized_return = calculate_annualized_return(filtered_daily_returns, start_date=start_date, end_date=end_date)
+            
+            # 计算夏普比率
+            sharpe_ratio = calculate_sharpe_ratio(filtered_daily_returns, start_date=start_date, end_date=end_date)
+            
+            # 计算最大回撤
+            max_drawdown = calculate_max_drawdown(filtered_cumulative_returns)
+            
+            # 计算最大回撤的开始和结束日期
+            try:
+                max_drawdown_start_date, max_drawdown_end_date = self._calculate_max_drawdown_dates(
+                    filtered_cumulative_returns, filtered_dates
+                )
+            except Exception as e:
+                print(f"警告: 计算最大回撤日期失败 {interval_name}: {e}")
+                max_drawdown_start_date, max_drawdown_end_date = '', ''
+            
+            interval_statistics.append({
+                'name': f"{name}_{interval_name}",
+                'type': data_type,
+                'interval': interval_name,
+                'total_return': round(float(total_return), 2),
+                'annualized_return': round(float(annualized_return), 2),
+                'max_drawdown': round(float(max_drawdown), 2),
+                'max_drawdown_start_date': self._format_date(max_drawdown_start_date),
+                'max_drawdown_end_date': self._format_date(max_drawdown_end_date),
+                'sharpe_ratio': round(float(sharpe_ratio), 4) if not isinstance(sharpe_ratio, complex) else 0.0,
+                'trading_days': len(filtered_daily_returns)
+            })
+        
+        return interval_statistics
+    
+    def _calculate_max_drawdown_dates(self, cumulative_returns: List[float], dates: List[str]) -> Tuple[str, str]:
+        """
+        计算最大回撤的开始和结束日期
+        
+        Args:
+            cumulative_returns: 累积收益率列表
+            dates: 日期列表
+            
+        Returns:
+            Tuple[str, str]: (开始日期, 结束日期)
+        """
+        if not cumulative_returns or not dates or len(cumulative_returns) != len(dates):
+            return '', ''
+        
+        # 将累积收益率转换为累积值
+        cumulative_values = [100 + ret for ret in cumulative_returns]
+        
+        # 计算最大回撤区间
+        try:
+            max_drawdown, start_idx, end_idx = self.calculate_max_drawdown_with_period(cumulative_values)
+            
+            if start_idx >= 0 and end_idx >= 0 and start_idx < len(dates) and end_idx < len(dates):
+                return dates[start_idx], dates[end_idx]
+        except Exception as e:
+            print(f"计算最大回撤区间失败: {e}")
+        
+        return '', ''
 
 
 class DebugDataExporter:
@@ -989,7 +1103,75 @@ def main():
                 index_viz_data['cumulative_returns']
             )
         
-        # 6. 导出统计指标汇总
+        # 6. 计算时间区间统计指标
+        print("正在计算时间区间统计指标...")
+        all_interval_statistics = []
+        
+        # 为每个回测数据计算时间区间统计指标
+        for file_info in files_info:
+            backtest_data = load_backtest_data(file_info['backtest_file'])
+            backtest_viz_data = prepare_backtest_data_for_visualization(backtest_data)
+            
+            # 计算回测数据的时间区间统计指标
+            interval_stats = stats_calculator.calculate_time_interval_statistics(
+                backtest_viz_data['daily_returns'],
+                backtest_viz_data['cumulative_returns'],
+                file_info['backtest_name'],
+                'backtest',
+                backtest_viz_data['dates']
+            )
+            all_interval_statistics.extend(interval_stats)
+            
+            # 计算对冲数据的时间区间统计指标
+            index_file = index_manager.get_index_file(args.index)
+            if index_file:
+                try:
+                    hedge_data = calculate_hedge_data(
+                        backtest_file=file_info['backtest_file'],
+                        position_file=file_info['position_file'],
+                        index_file=index_file
+                    )
+                    
+                    hedge_returns = [item['hedge_return'] for item in hedge_data['data']]
+                    hedge_dates = [item['date'] for item in hedge_data['data']]
+                    
+                    # 计算对冲累积收益率
+                    hedge_cumulative = []
+                    cumulative_value = 100.0
+                    
+                    for daily_return in hedge_returns:
+                        return_rate = daily_return / 100.0
+                        cumulative_value = cumulative_value * (1 + return_rate)
+                        cumulative_return_percent = (cumulative_value - 100.0)
+                        hedge_cumulative.append(cumulative_return_percent)
+                    
+                    # 计算对冲数据的时间区间统计指标
+                    hedge_interval_stats = stats_calculator.calculate_time_interval_statistics(
+                        hedge_returns,
+                        hedge_cumulative,
+                        f"{file_info['backtest_name']}-{args.index}",
+                        'hedge',
+                        hedge_dates
+                    )
+                    all_interval_statistics.extend(hedge_interval_stats)
+                    
+                except Exception as e:
+                    print(f"警告: 计算对冲时间区间统计指标失败 {file_info['backtest_name']}: {e}")
+        
+        # 为指数数据计算时间区间统计指标
+        for index_name, index_data in all_indices_data.items():
+            index_viz_data = prepare_index_data_for_visualization(index_data)
+            
+            index_interval_stats = stats_calculator.calculate_time_interval_statistics(
+                index_viz_data['daily_returns'],
+                index_viz_data['cumulative_returns'],
+                index_name,
+                'index',
+                index_viz_data['dates']
+            )
+            all_interval_statistics.extend(index_interval_stats)
+        
+        # 7. 导出统计指标汇总
         print("正在导出统计指标...")
         # 创建统计结果导出器（无论是否启用调试模式都导出统计结果）
         if not debug_exporter:
@@ -1000,7 +1182,19 @@ def main():
         
         stats_exporter.export_statistics_summary(all_statistics)
         
-        # 7. 生成可视化文件
+        # 导出时间区间统计指标
+        if all_interval_statistics:
+            interval_stats_file = debug_dir / 'interval_statistics_summary.csv'
+            with open(interval_stats_file, 'w', newline='', encoding='utf-8') as csvfile:
+                fieldnames = ['name', 'type', 'interval', 'total_return', 'annualized_return', 
+                             'max_drawdown', 'max_drawdown_start_date', 'max_drawdown_end_date',
+                             'sharpe_ratio', 'trading_days']
+                writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+                writer.writeheader()
+                writer.writerows(all_interval_statistics)
+            print(f"时间区间统计指标已导出: {interval_stats_file}")
+        
+        # 8. 生成可视化文件
         print("正在生成可视化文件...")
         visualizer.generate_html(
             str(output_file),

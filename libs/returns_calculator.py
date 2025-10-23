@@ -170,7 +170,9 @@ def calculate_cumulative_returns(
 
 def calculate_annualized_return(
     daily_returns: List[float],
-    trading_days: int = 252
+    trading_days: int = 252,
+    start_date: str = None,
+    end_date: str = None
 ) -> float:
     """
     计算年化收益率
@@ -178,6 +180,8 @@ def calculate_annualized_return(
     Args:
         daily_returns: 日收益率列表（百分比形式，如1.5表示1.5%）
         trading_days: 一年中的交易日数量，默认为252
+        start_date: 开始日期（YYYYMMDD格式），用于计算实际年数
+        end_date: 结束日期（YYYYMMDD格式），用于计算实际年数
         
     Returns:
         float: 年化收益率（百分比形式）
@@ -198,8 +202,22 @@ def calculate_annualized_return(
     # 获取最终累积收益率
     final_cumulative_return = (cumulative_values[-1] - 100.0) / 100.0  # 转换为小数
     
-    # 计算年化收益率
-    years = len(daily_returns) / trading_days
+    # 计算年数
+    if start_date and end_date:
+        # 使用实际日期计算年数（聚宽标准）
+        from datetime import datetime
+        try:
+            start_dt = datetime.strptime(start_date, '%Y%m%d')
+            end_dt = datetime.strptime(end_date, '%Y%m%d')
+            total_days = (end_dt - start_dt).days
+            years = total_days / 365.25  # 考虑闰年
+        except:
+            # 如果日期解析失败，回退到交易日计算
+            years = len(daily_returns) / trading_days
+    else:
+        # 使用交易日计算年数
+        years = len(daily_returns) / trading_days
+    
     if years == 0:
         return 0.0
     
@@ -212,7 +230,9 @@ def calculate_annualized_return(
 def calculate_sharpe_ratio(
     daily_returns: List[float],
     risk_free_rate: float = 3.0,
-    trading_days: int = 252
+    trading_days: int = 252,
+    start_date: str = None,
+    end_date: str = None
 ) -> float:
     """
     计算夏普比率
@@ -221,6 +241,8 @@ def calculate_sharpe_ratio(
         daily_returns: 日收益率列表（百分比形式，如1.5表示1.5%）
         risk_free_rate: 无风险利率（年化，百分比形式），默认为3.0%
         trading_days: 一年中的交易日数量，默认为252
+        start_date: 开始日期（YYYYMMDD格式），用于计算实际年数
+        end_date: 结束日期（YYYYMMDD格式），用于计算实际年数
         
     Returns:
         float: 夏普比率
@@ -234,7 +256,7 @@ def calculate_sharpe_ratio(
         return 0.0
     
     # 计算年化收益率
-    annualized_return = calculate_annualized_return(daily_returns, trading_days)
+    annualized_return = calculate_annualized_return(daily_returns, trading_days, start_date, end_date)
     
     # 计算年化波动率
     import numpy as np

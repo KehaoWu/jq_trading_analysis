@@ -1,0 +1,6 @@
+name,type,total_return,annualized_return,max_drawdown,sharpe_ratio,trading_days
+模拟盘-T1卖出,backtest,116.44,2.58,-42.97,-0.0157,1344
+zz1000,index,518.15,11.43,-72.35,0.3035,3829
+zz500,index,282.19,6.63,-65.2,0.1405,4070
+hs300,index,155.49,2.77,-46.7,-0.0102,4070
+cyb,index,223.82,5.6,-69.74,0.0845,3727

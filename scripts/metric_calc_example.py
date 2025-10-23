@@ -1,36 +1,19 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-金融指标计算模块
+指标计算模块
 实现年化收益率、最大回撤、夏普比率、最长回撤修复期等指标计算
-
-主要功能：
-- 数据加载和日收益率提取
-- 年化收益率计算
-- 最大回撤计算
-- 夏普比率计算
-- 最长回撤修复期计算
-- 综合指标计算
 """
 
 import numpy as np
 import pandas as pd
-from typing import Dict, List, Tuple, Optional, Union
+from typing import Dict, List, Tuple, Optional
 from datetime import datetime, timedelta
 import json
-import warnings
 
 
 def load_backtest_data(file_path: str) -> List[Dict]:
-    """
-    加载回测数据文件
-    
-    Args:
-        file_path: 回测数据文件路径
-        
-    Returns:
-        回测数据列表
-    """
+    """加载回测数据文件"""
     data = []
     with open(file_path, 'r', encoding='utf-8') as f:
         for line in f:
@@ -121,34 +104,12 @@ def extract_daily_returns(backtest_data: List[Dict]) -> pd.DataFrame:
 
 
 def calculate_cumulative_returns(returns: pd.Series) -> pd.Series:
-    """
-    计算累积收益率
-    
-    Args:
-        returns: 日收益率序列
-        
-    Returns:
-        累积收益率序列
-    """
-    if len(returns) == 0:
-        return pd.Series(dtype=float)
-    
-    # 过滤无效值
-    valid_returns = returns.fillna(0)
-    return (1 + valid_returns).cumprod() - 1
+    """计算累积收益率"""
+    return (1 + returns).cumprod() - 1
 
 
 def calculate_annualized_return(returns: pd.Series, trading_days_per_year: int = 252) -> float:
-    """
-    计算年化收益率
-    
-    Args:
-        returns: 日收益率序列
-        trading_days_per_year: 每年交易日数，默认252天
-        
-    Returns:
-        年化收益率
-    """
+    """计算年化收益率"""
     if len(returns) == 0:
         return 0.0
     
@@ -187,12 +148,6 @@ def calculate_max_drawdown(cumulative_returns: pd.Series) -> Dict:
     1. 维护当前的峰值点
     2. 计算每个点相对于当前峰值的回撤
     3. 当遇到新的峰值时，更新峰值点
-    
-    Args:
-        cumulative_returns: 累积收益率序列
-        
-    Returns:
-        包含最大回撤信息的字典
     """
     if len(cumulative_returns) == 0:
         return {
@@ -258,17 +213,7 @@ def calculate_max_drawdown(cumulative_returns: pd.Series) -> Dict:
 
 def calculate_sharpe_ratio(returns: pd.Series, risk_free_rate: float = 0.03, 
                           trading_days_per_year: int = 252) -> float:
-    """
-    计算夏普比率
-    
-    Args:
-        returns: 日收益率序列
-        risk_free_rate: 无风险利率，默认3%
-        trading_days_per_year: 每年交易日数，默认252天
-        
-    Returns:
-        夏普比率
-    """
+    """计算夏普比率"""
     if len(returns) == 0 or returns.std() == 0:
         return 0.0
     
@@ -280,13 +225,7 @@ def calculate_sharpe_ratio(returns: pd.Series, risk_free_rate: float = 0.03,
 def calculate_longest_drawdown_recovery(cumulative_returns: pd.Series) -> Dict:
     """
     计算最长回撤修复期
-    根据需求：修复期是指从最大回撤的最低点开始，到净值重新回到回撤前的最高点为止的时间，单位为天
-    
-    Args:
-        cumulative_returns: 累积收益率序列
-        
-    Returns:
-        包含最长回撤修复期信息的字典
+    根据第11点需求：修复期是指从最大回撤的最低点开始，到净值重新回到回撤前的最高点为止的时间，单位为天
     """
     if len(cumulative_returns) == 0:
         return {
@@ -354,17 +293,7 @@ def calculate_longest_drawdown_recovery(cumulative_returns: pd.Series) -> Dict:
 def calculate_all_metrics(returns_df: pd.DataFrame, 
                          start_date: Optional[str] = None,
                          end_date: Optional[str] = None) -> Dict:
-    """
-    计算所有指标
-    
-    Args:
-        returns_df: 包含日期、策略收益率、基准收益率的DataFrame
-        start_date: 开始日期，格式为'YYYY-MM-DD'
-        end_date: 结束日期，格式为'YYYY-MM-DD'
-        
-    Returns:
-        包含所有指标的字典
-    """
+    """计算所有指标"""
     
     # 过滤时间范围
     if start_date or end_date:
@@ -437,70 +366,26 @@ def calculate_all_metrics(returns_df: pd.DataFrame,
     }
 
 
-# 便捷函数
-def calculate_metrics_from_file(file_path: str, 
-                               start_date: Optional[str] = None,
-                               end_date: Optional[str] = None,
-                               trading_days_per_year: int = 252,
-                               risk_free_rate: float = 0.03) -> Dict:
-    """
-    从文件直接计算指标的便捷函数
+def merge_backtest_data(file_paths: List[str]) -> pd.DataFrame:
+    """合并多个回测文件的数据"""
+    all_data = []
     
-    Args:
-        file_path: 回测数据文件路径
-        start_date: 开始日期，格式为'YYYY-MM-DD'
-        end_date: 结束日期，格式为'YYYY-MM-DD'
-        trading_days_per_year: 每年交易日数，默认252天
-        risk_free_rate: 无风险利率，默认3%
-        
-    Returns:
-        包含所有指标的字典
-    """
-    backtest_data = load_backtest_data(file_path)
-    returns_df = extract_daily_returns(backtest_data)
-    return calculate_all_metrics(returns_df, start_date, end_date)
-
-
-def print_metrics_report(file_path: str, 
-                        start_date: Optional[str] = None,
-                        end_date: Optional[str] = None,
-                        trading_days_per_year: int = 252,
-                        risk_free_rate: float = 0.03) -> None:
-    """
-    打印指标报告的便捷函数
+    for file_path in file_paths:
+        try:
+            backtest_data = load_backtest_data(file_path)
+            daily_df = extract_daily_returns(backtest_data)
+            all_data.append(daily_df)
+        except Exception as e:
+            print(f"警告: 无法加载文件 {file_path}: {e}")
+            continue
     
-    Args:
-        file_path: 回测数据文件路径
-        start_date: 开始日期，格式为'YYYY-MM-DD'
-        end_date: 结束日期，格式为'YYYY-MM-DD'
-        trading_days_per_year: 每年交易日数，默认252天
-        risk_free_rate: 无风险利率，默认3%
-    """
-    metrics = calculate_metrics_from_file(file_path, start_date, end_date, trading_days_per_year, risk_free_rate)
+    if not all_data:
+        return pd.DataFrame()
     
-    report = f"""
-=== 策略表现分析报告 ===
-分析期间: {metrics['period_start']} 至 {metrics['period_end']}
-交易日数: {metrics['trading_days']} 天
-
-=== 收益指标 ===
-年化收益率: {metrics['annualized_return']:.2%}
-总收益率: {metrics['total_return']:.2%}
-基准年化收益率: {metrics['benchmark_annualized_return']:.2%}
-基准总收益率: {metrics['benchmark_total_return']:.2%}
-超额收益: {metrics['excess_return']:.2%}
-
-=== 风险指标 ===
-最大回撤: {metrics['max_drawdown']:.2%}
-回撤开始日期: {metrics['drawdown_start_date'] or 'N/A'}
-回撤结束日期: {metrics['drawdown_end_date'] or 'N/A'}
-
-=== 风险调整收益指标 ===
-夏普比率: {metrics['sharpe_ratio']:.4f}
-
-=== 回撤修复指标 ===
-最长回撤修复期: {metrics['longest_recovery_days']} 天
-修复开始日期: {metrics['recovery_start_date'] or 'N/A'}
-修复结束日期: {metrics['recovery_end_date'] or 'N/A'}
-"""
-    print(report)
+    # 合并所有数据
+    merged_df = pd.concat(all_data, ignore_index=True)
+    
+    # 按日期排序并去重
+    merged_df = merged_df.sort_values('date').drop_duplicates(subset=['date']).reset_index(drop=True)
+    
+    return merged_df

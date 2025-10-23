@@ -34,7 +34,13 @@ sys.path.insert(0, str(project_root))
 
 from libs.hedge_data_calc import calculate_hedge_data
 from libs.data_loader import load_backtest_data, load_index_data
-from libs.returns_calculator import calculate_daily_returns, calculate_cumulative_returns
+from libs.returns_calculator import (
+    calculate_daily_returns, 
+    calculate_cumulative_returns,
+    calculate_annualized_return,
+    calculate_sharpe_ratio,
+    calculate_max_drawdown
+)
 
 
 class BacktestFileIdentifier:
@@ -284,6 +290,148 @@ def prepare_index_data_for_visualization(index_data: List[Dict]) -> Dict[str, Li
     }
 
 
+class StatisticsCalculator:
+    """统计指标计算器"""
+    
+    def __init__(self):
+        """初始化统计指标计算器"""
+        pass
+    
+    def _format_date(self, date_str: str) -> str:
+        """
+        统一日期格式为YYYY-MM-DD
+        
+        Args:
+            date_str: 输入日期字符串（可能是YYYYMMDD或YYYY-MM-DD格式）
+            
+        Returns:
+            str: 格式化后的日期字符串（YYYY-MM-DD）
+        """
+        if not date_str:
+            return ''
+        
+        # 如果已经是YYYY-MM-DD格式，直接返回
+        if '-' in date_str and len(date_str) == 10:
+            return date_str
+        
+        # 如果是YYYYMMDD格式，转换为YYYY-MM-DD
+        if len(date_str) == 8 and date_str.isdigit():
+            try:
+                from datetime import datetime
+                dt = datetime.strptime(date_str, '%Y%m%d')
+                return dt.strftime('%Y-%m-%d')
+            except:
+                return date_str
+        
+        return date_str
+    
+    def calculate_max_drawdown_with_period(self, cumulative_values: List[float]) -> Tuple[float, int, int]:
+        """
+        计算最大回撤及其区间起始点
+        
+        Args:
+            cumulative_values: 累积值列表
+            
+        Returns:
+            Tuple[float, int, int]: (最大回撤百分比, 回撤开始索引, 回撤结束索引)
+        """
+        if not cumulative_values:
+            return 0.0, -1, -1
+        
+        import numpy as np
+        
+        # 转换为numpy数组
+        values = np.array(cumulative_values)
+        
+        # 计算峰值
+        peak = np.maximum.accumulate(values)
+        
+        # 计算回撤
+        drawdown = (values - peak) / peak
+        
+        # 找到最大回撤的索引
+        max_dd_idx = np.argmin(drawdown)
+        max_drawdown = drawdown[max_dd_idx] * 100
+        
+        # 找到回撤开始的索引（最大回撤点之前的最后一个峰值）
+        start_idx = 0
+        for i in range(max_dd_idx, -1, -1):
+            if values[i] == peak[max_dd_idx]:
+                start_idx = i
+                break
+        
+        return max_drawdown, start_idx, max_dd_idx
+    
+    def calculate_statistics(self, daily_returns: List[float], cumulative_returns: List[float], 
+                           name: str, data_type: str, dates: List[str] = None) -> Dict[str, float]:
+        """
+        计算统计指标
+        
+        Args:
+            daily_returns: 日收益率列表（百分比形式）
+            cumulative_returns: 累积收益率列表（百分比形式）
+            name: 数据名称
+            data_type: 数据类型（backtest, hedge, index）
+            dates: 日期列表（可选）
+            
+        Returns:
+            Dict: 包含统计指标的字典
+        """
+        if not daily_returns or not cumulative_returns:
+            return {
+                'name': name,
+                'type': data_type,
+                'total_return': 0.0,
+                'annualized_return': 0.0,
+                'max_drawdown': 0.0,
+                'max_drawdown_start_date': '',
+                'max_drawdown_end_date': '',
+                'sharpe_ratio': 0.0,
+                'trading_days': 0
+            }
+        
+        # 计算区间收益率（总收益率）
+        total_return = cumulative_returns[-1] if cumulative_returns else 0.0
+        
+        # 获取开始和结束日期
+        start_date = dates[0] if dates else None
+        end_date = dates[-1] if dates else None
+        
+        # 计算年化收益率
+        annualized_return = calculate_annualized_return(daily_returns, start_date=start_date, end_date=end_date)
+        
+        # 计算最大回撤（需要累积值，不是累积收益率）
+        # 将累积收益率转换为累积值
+        cumulative_values = [100 + ret for ret in cumulative_returns]
+        max_drawdown, start_idx, end_idx = self.calculate_max_drawdown_with_period(cumulative_values)
+        
+        # 获取最大回撤区间的日期
+        max_drawdown_start_date = ''
+        max_drawdown_end_date = ''
+        if dates and start_idx >= 0 and end_idx >= 0:
+            start_date_raw = dates[start_idx] if start_idx < len(dates) else ''
+            end_date_raw = dates[end_idx] if end_idx < len(dates) else ''
+            
+            # 统一日期格式为YYYY-MM-DD
+            max_drawdown_start_date = self._format_date(start_date_raw)
+            max_drawdown_end_date = self._format_date(end_date_raw)
+        
+        # 计算夏普比率
+        sharpe_ratio = calculate_sharpe_ratio(daily_returns, start_date=start_date, end_date=end_date)
+        
+        return {
+            'name': name,
+            'type': data_type,
+            'total_return': round(total_return, 2),
+            'annualized_return': round(annualized_return, 2),
+            'max_drawdown': round(max_drawdown, 2),
+            'max_drawdown_start_date': max_drawdown_start_date,
+            'max_drawdown_end_date': max_drawdown_end_date,
+            'sharpe_ratio': round(sharpe_ratio, 4),
+            'trading_days': len(daily_returns)
+        }
+
+
 class DebugDataExporter:
     """调试数据导出器"""
     
@@ -404,6 +552,31 @@ class DebugDataExporter:
                 writer.writerows(export_data)
             
             print(f"指数数据已导出: {filepath}")
+    
+    def export_statistics_summary(self, statistics_list: List[Dict]):
+        """
+        导出统计指标汇总到CSV文件
+        
+        Args:
+            statistics_list: 统计指标列表
+        """
+        if not statistics_list:
+            return
+        
+        # 创建文件名
+        filename = "statistics_summary.csv"
+        filepath = self.debug_dir / filename
+        
+        # 写入CSV文件
+        with open(filepath, 'w', newline='', encoding='utf-8') as csvfile:
+            fieldnames = ['name', 'type', 'total_return', 'annualized_return', 
+                         'max_drawdown', 'max_drawdown_start_date', 'max_drawdown_end_date',
+                         'sharpe_ratio', 'trading_days']
+            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows(statistics_list)
+        
+        print(f"统计指标汇总已导出: {filepath}")
 
 
 class EChartsVisualizer:
@@ -659,6 +832,10 @@ def main():
         debug_exporter = DebugDataExporter(debug_dir)
         print(f"调试模式已启用，调试数据将输出到: {debug_dir}")
     
+    # 初始化统计计算器和结果列表
+    stats_calculator = StatisticsCalculator()
+    all_statistics = []
+    
     try:
         # 1. 识别回测文件
         print("正在识别回测文件...")
@@ -699,6 +876,16 @@ def main():
                     backtest_viz_data['cumulative_returns'],
                     "backtest"
                 )
+            
+            # 计算回测数据统计指标
+            backtest_stats = stats_calculator.calculate_statistics(
+                backtest_viz_data['daily_returns'],
+                backtest_viz_data['cumulative_returns'],
+                file_info['backtest_name'],
+                'backtest',
+                backtest_viz_data['dates']
+            )
+            all_statistics.append(backtest_stats)
             
             # 添加回测数据到可视化
             visualizer.add_backtest_series(
@@ -749,6 +936,16 @@ def main():
                             f"hedge_{args.index}"
                         )
                     
+                    # 计算对冲数据统计指标
+                    hedge_stats = stats_calculator.calculate_statistics(
+                        hedge_returns,
+                        hedge_cumulative,
+                        f"{file_info['backtest_name']}-{args.index}",
+                        'hedge',
+                        hedge_dates
+                    )
+                    all_statistics.append(hedge_stats)
+                    
                     # 添加对冲数据到可视化
                     visualizer.add_hedge_series(
                         f"{file_info['backtest_name']}-{args.index}",
@@ -776,13 +973,34 @@ def main():
                     index_viz_data['cumulative_returns']
                 )
             
+            # 计算指数数据统计指标
+            index_stats = stats_calculator.calculate_statistics(
+                index_viz_data['daily_returns'],
+                index_viz_data['cumulative_returns'],
+                index_name,
+                'index',
+                index_viz_data['dates']
+            )
+            all_statistics.append(index_stats)
+            
             visualizer.add_index_series(
                 index_name,
                 index_viz_data['dates'],
                 index_viz_data['cumulative_returns']
             )
         
-        # 6. 生成可视化文件
+        # 6. 导出统计指标汇总
+        print("正在导出统计指标...")
+        # 创建统计结果导出器（无论是否启用调试模式都导出统计结果）
+        if not debug_exporter:
+            debug_dir = output_dir / 'debug_data'
+            stats_exporter = DebugDataExporter(debug_dir)
+        else:
+            stats_exporter = debug_exporter
+        
+        stats_exporter.export_statistics_summary(all_statistics)
+        
+        # 7. 生成可视化文件
         print("正在生成可视化文件...")
         visualizer.generate_html(
             str(output_file),

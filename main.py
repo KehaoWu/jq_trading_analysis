@@ -4,9 +4,10 @@
 
 该脚本提供了对整个项目功能的统一入口，包括：
 - calculate_daily_returns: 计算日收益率
-- hedge_example: 对冲数据计算示例
-- hedge_example_advanced: 高级对冲数据计算示例
-- hedge_example_advanced_echarts: 使用ECharts的高级对冲数据计算示例
+- combine_two_backtests: 合并两个不同时间段的回测数据
+- backtest_hedge_plot: 回测对冲数据计算和可视化
+- backtest_vis: 回测结果可视化
+- hedge_analysis_visualization: 对冲分析可视化（自动识别文件并生成完整分析）
 - cleanup: 清理项目中的临时文件和测试脚本
 
 使用方法:
@@ -15,9 +16,13 @@
 示例:
     python main.py calculate_daily_returns backtest_data/模拟盘-T1卖出_028edf215c65d9b365fa51bb27b9788b_20200102_20250721_daily.jsonl
     
-    python main.py hedge_example
+    python main.py combine_two_backtests
     
-    python main.py hedge_example_advanced
+    python main.py backtest_hedge_plot
+    
+    python main.py backtest_vis output/merged_backtest.jsonl
+    
+    python main.py hedge_analysis_visualization --input_dir backtest_data/ex_tm1_top30 --index zz500
 """
 
 import os
@@ -67,9 +72,9 @@ def main():
         print("使用方法: python main.py <功能名称> [参数...]\n")
         print("可用命令:")
         print("  calculate_daily_returns - 计算日收益率")
-        print("  hedge_example - 对冲数据计算示例")
-        print("  hedge_example_advanced - 高级对冲数据计算示例")
-        print("  hedge_example_advanced_echarts - 使用ECharts的高级对冲数据计算示例")
+        print("  combine_two_backtests - 合并两个不同时间段的回测数据")
+        print("  backtest_hedge_plot - 回测对冲数据计算和可视化")
+        print("  backtest_vis - 回测结果可视化")
         print("  cleanup - 清理项目中的临时文件和测试脚本")
         print("\n使用 'python main.py <功能名称> --help' 查看具体功能的详细帮助信息")
         return

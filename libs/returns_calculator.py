@@ -133,7 +133,7 @@ def calculate_daily_returns_to_csv(
 
 def calculate_cumulative_returns(
     daily_returns: List[float],
-    initial_value: float = 100.0
+    initial_value: float = 100
 ) -> List[float]:
     """
     根据日收益率计算累积收益率
@@ -161,6 +161,8 @@ def calculate_cumulative_returns(
         # 计算累积值
         new_value = cumulative_values[-1] * (1 + return_rate)
         cumulative_values.append(new_value)
+    
+    cumulative_values = [value - initial_value for value in cumulative_values]
     
     # 返回除初始值外的累积值
     return cumulative_values[1:]

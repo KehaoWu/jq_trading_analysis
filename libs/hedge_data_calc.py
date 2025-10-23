@@ -19,7 +19,7 @@ from .format_converter import (
     generate_hedge_backtest_format,
     generate_hedge_position_format
 )
-from .returns_calculator import calculate_daily_returns_to_csv
+from .returns_calculator import calculate_daily_returns_to_csv, calculate_daily_returns
 from .utils import parse_date_string
 
 
@@ -27,7 +27,6 @@ def calculate_hedge_data(
     backtest_file: str,
     position_file: Optional[str] = None,
     index_file: str = "",
-    hedge_ratio: float = 1.0,
     output_file: Optional[str] = None
 ) -> Dict:
     """
@@ -57,9 +56,6 @@ def calculate_hedge_data(
     if position_file and not os.path.exists(position_file):
         raise FileNotFoundError(f"持仓数据文件不存在: {position_file}")
     
-    if not isinstance(hedge_ratio, (int, float)) or hedge_ratio < 0 or hedge_ratio > 1:
-        raise ValueError("对冲比例必须是0到1之间的数字")
-    
     # 加载数据
     backtest_data = load_backtest_data(backtest_file)
     index_data = load_index_data(index_file)
@@ -81,9 +77,19 @@ def calculate_hedge_data(
     
     backtest_df = pd.DataFrame(backtest_records)
     
-    # 计算日收益率（从累积收益率计算）
+    # 计算日收益率（使用标准化方法从累积收益率计算）
     backtest_df = backtest_df.sort_values('date')
-    backtest_df['return'] = backtest_df['cumulative_return'].diff().fillna(0)
+    
+    # 使用returns_calculator模块的标准化方法计算日收益率
+    backtest_records_with_daily_returns = calculate_daily_returns(
+        backtest_df.to_dict('records'),
+        date_column='date',
+        cumulative_return_column='cumulative_return'
+    )
+    
+    # 更新DataFrame
+    backtest_df = pd.DataFrame(backtest_records_with_daily_returns)
+    backtest_df['return'] = backtest_df['daily_return']
     
     # 将指数数据转换为DataFrame
     index_df = pd.DataFrame([
@@ -111,38 +117,9 @@ def calculate_hedge_data(
         ])
         merged_df = pd.merge(merged_df, position_df, on='date', how='left')
         
-        # 填充缺失的持仓数据
-        merged_df['position_ratio'] = merged_df['position_ratio'].ffill().fillna(0)
-        merged_df['cash'] = merged_df['cash'].ffill().fillna(0)
-        merged_df['total_value'] = merged_df['total_value'].ffill().fillna(0)
-        merged_df['net_value'] = merged_df['net_value'].ffill().fillna(0)
-    else:
-        # 如果没有持仓数据，使用默认值
-        merged_df['position_ratio'] = hedge_ratio
-        merged_df['cash'] = 0
-        merged_df['total_value'] = 0
-        merged_df['net_value'] = 0
     
-    # 计算对冲收益率: 对冲收益率 = 回测收益率 - 对冲持仓比例 * 指数收益率
+    # 计算对冲收益率: 对冲日收益率 = 回测日收益率 - 回测持仓比例 * 指数收益率
     merged_df['hedge_return'] = merged_df['return_backtest'] - merged_df['position_ratio'] * merged_df['return_index']
-    
-    # 计算对冲净值
-    if position_data and 'balances' in position_data:
-        # 如果有持仓数据，使用实际净值计算对冲净值
-        initial_net_value = merged_df.iloc[0]['net_value']
-        merged_df['hedge_net_value'] = initial_net_value * (1 + merged_df['hedge_return'] / 100).cumprod()
-        
-        # 计算对冲现金和对冲总市值
-        merged_df['hedge_cash'] = merged_df['cash'] + merged_df['position_ratio'] * merged_df['total_value']
-        merged_df['hedge_total_value'] = merged_df['hedge_net_value']
-    else:
-        # 如果没有持仓数据，使用假设的初始净值
-        initial_net_value = 100000000  # 假设初始净值为1亿
-        merged_df['hedge_net_value'] = initial_net_value * (1 + merged_df['hedge_return'] / 100).cumprod()
-        
-        # 计算对冲现金和对冲总市值
-        merged_df['hedge_cash'] = initial_net_value * (1 - merged_df['position_ratio'])
-        merged_df['hedge_total_value'] = merged_df['hedge_net_value']
     
     # 转换为输出格式
     hedge_data = {
@@ -150,13 +127,13 @@ def calculate_hedge_data(
             "backtest_file": backtest_file,
             "position_file": position_file,
             "index_file": index_file,
-            "hedge_ratio": hedge_ratio,
             "calculation_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         },
         "data": []
     }
     
     for _, row in merged_df.iterrows():
+        # 处理NaN值，确保所有字段都有有效值
         hedge_data["data"].append({
             "date": row['date'],
             "backtest_return": row['return_backtest'],
@@ -165,10 +142,7 @@ def calculate_hedge_data(
             "hedge_return": row['hedge_return'],
             "cash": row['cash'],
             "total_value": row['total_value'],
-            "net_value": row['net_value'],
-            "hedge_cash": row['hedge_cash'],
-            "hedge_total_value": row['hedge_total_value'],
-            "hedge_net_value": row['hedge_net_value']
+            "net_value": row['net_value']
         })
     
     # 如果指定了输出文件，则保存结果

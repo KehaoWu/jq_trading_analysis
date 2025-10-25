@@ -35,6 +35,11 @@ TIME_INTERVALS = {
     "20-21年抱团": [
         ("2020-07-10", "2021-02-18"),  # 抱团风格区间
     ],
+    
+    # 新增：小票急跌区间
+    "小票急跌区间": [
+        ("2023-11-01", "2024-02-08"),  # 小票急跌区间
+    ],
 }
 
 
@@ -450,3 +455,233 @@ def calculate_max_drawdown(
     
     # 返回最大回撤（转换为百分比）
     return drawdown.min() * 100
+
+
+def calculate_longest_drawdown_recovery_period(
+    cumulative_values: List[float],
+    dates: List[str] = None
+) -> Dict[str, Union[int, float, str]]:
+    """
+    计算最长回撤修复期
+    
+    回撤修复期是指从回撤开始到恢复到之前高点所需的时间。
+    该函数计算所有回撤修复期中最长的一个。
+    
+    Args:
+        cumulative_values: 累积值列表
+        dates: 日期列表（可选），用于返回具体的开始和结束日期
+        
+    Returns:
+        Dict[str, Union[int, float, str]]: 包含以下信息的字典：
+            - longest_recovery_days: 最长回撤修复期（天数）
+            - max_drawdown_value: 最大回撤值（百分比）
+            - recovery_start_date: 回撤开始日期（如果提供了dates参数）
+            - recovery_end_date: 回撤修复完成日期（如果提供了dates参数）
+            - recovery_start_index: 回撤开始的索引位置
+            - recovery_end_index: 回撤修复完成的索引位置
+        
+    Example:
+        >>> values = [100, 110, 105, 120, 115, 90, 95, 100, 110, 125]
+        >>> result = calculate_longest_drawdown_recovery_period(values)
+        >>> result['longest_recovery_days']
+        4
+        >>> round(result['max_drawdown_value'], 2)
+        -25.0
+    """
+    if not cumulative_values or len(cumulative_values) < 2:
+        return {
+            'longest_recovery_days': 0,
+            'max_drawdown_value': 0.0,
+            'recovery_start_date': None,
+            'recovery_end_date': None,
+            'recovery_start_index': -1,
+            'recovery_end_index': -1
+        }
+    
+    import numpy as np
+    
+    # 转换为numpy数组
+    values = np.array(cumulative_values)
+    
+    # 计算峰值
+    peak = np.maximum.accumulate(values)
+    
+    # 计算回撤
+    drawdown = (values - peak) / peak
+    
+    # 找到所有回撤期间
+    longest_recovery_days = 0
+    max_drawdown_in_longest_period = 0.0
+    longest_start_idx = -1
+    longest_end_idx = -1
+    
+    # 标记是否处于回撤状态
+    in_drawdown = False
+    drawdown_start_idx = -1
+    
+    for i in range(len(values)):
+        # 检查是否开始新的回撤
+        if not in_drawdown and drawdown[i] < 0:
+            in_drawdown = True
+            drawdown_start_idx = i
+        
+        # 检查是否结束回撤（恢复到峰值）
+        elif in_drawdown and drawdown[i] >= 0:
+            in_drawdown = False
+            recovery_days = i - drawdown_start_idx
+            
+            # 计算这个回撤期间的最大回撤
+            period_drawdown = drawdown[drawdown_start_idx:i+1]
+            period_max_drawdown = period_drawdown.min()
+            
+            # 更新最长回撤修复期
+            if recovery_days > longest_recovery_days:
+                longest_recovery_days = recovery_days
+                max_drawdown_in_longest_period = period_max_drawdown
+                longest_start_idx = drawdown_start_idx
+                longest_end_idx = i
+    
+    # 处理到最后仍未恢复的回撤
+    if in_drawdown:
+        recovery_days = len(values) - 1 - drawdown_start_idx
+        period_drawdown = drawdown[drawdown_start_idx:]
+        period_max_drawdown = period_drawdown.min()
+        
+        if recovery_days > longest_recovery_days:
+            longest_recovery_days = recovery_days
+            max_drawdown_in_longest_period = period_max_drawdown
+            longest_start_idx = drawdown_start_idx
+            longest_end_idx = len(values) - 1
+    
+    # 构建返回结果
+    result = {
+        'longest_recovery_days': longest_recovery_days,
+        'max_drawdown_value': max_drawdown_in_longest_period * 100,  # 转换为百分比
+        'recovery_start_index': longest_start_idx,
+        'recovery_end_index': longest_end_idx,
+        'recovery_start_date': None,
+        'recovery_end_date': None
+    }
+    
+    # 如果提供了日期列表，添加具体日期
+    if dates and len(dates) == len(cumulative_values):
+        if longest_start_idx >= 0 and longest_start_idx < len(dates):
+            result['recovery_start_date'] = dates[longest_start_idx]
+        if longest_end_idx >= 0 and longest_end_idx < len(dates):
+            result['recovery_end_date'] = dates[longest_end_idx]
+    
+    return result
+
+
+def calculate_all_drawdown_recovery_periods(
+    cumulative_values: List[float],
+    dates: List[str] = None
+) -> List[Dict[str, Union[int, float, str]]]:
+    """
+    计算所有回撤修复期
+    
+    返回所有回撤修复期的详细信息，按修复期长度降序排列。
+    
+    Args:
+        cumulative_values: 累积值列表
+        dates: 日期列表（可选），用于返回具体的开始和结束日期
+        
+    Returns:
+        List[Dict[str, Union[int, float, str]]]: 所有回撤修复期的列表，每个元素包含：
+            - recovery_days: 回撤修复期（天数）
+            - max_drawdown_value: 该期间的最大回撤值（百分比）
+            - recovery_start_date: 回撤开始日期（如果提供了dates参数）
+            - recovery_end_date: 回撤修复完成日期（如果提供了dates参数）
+            - recovery_start_index: 回撤开始的索引位置
+            - recovery_end_index: 回撤修复完成的索引位置
+        
+    Example:
+        >>> values = [100, 110, 105, 120, 115, 90, 95, 100, 110, 125]
+        >>> results = calculate_all_drawdown_recovery_periods(values)
+        >>> len(results)
+        2
+        >>> results[0]['recovery_days']  # 最长的修复期
+        4
+    """
+    if not cumulative_values or len(cumulative_values) < 2:
+        return []
+    
+    import numpy as np
+    
+    # 转换为numpy数组
+    values = np.array(cumulative_values)
+    
+    # 计算峰值
+    peak = np.maximum.accumulate(values)
+    
+    # 计算回撤
+    drawdown = (values - peak) / peak
+    
+    # 收集所有回撤修复期
+    recovery_periods = []
+    
+    # 标记是否处于回撤状态
+    in_drawdown = False
+    drawdown_start_idx = -1
+    
+    for i in range(len(values)):
+        # 检查是否开始新的回撤
+        if not in_drawdown and drawdown[i] < 0:
+            in_drawdown = True
+            drawdown_start_idx = i
+        
+        # 检查是否结束回撤（恢复到峰值）
+        elif in_drawdown and drawdown[i] >= 0:
+            in_drawdown = False
+            recovery_days = i - drawdown_start_idx
+            
+            # 计算这个回撤期间的最大回撤
+            period_drawdown = drawdown[drawdown_start_idx:i+1]
+            period_max_drawdown = period_drawdown.min()
+            
+            # 构建回撤修复期信息
+            period_info = {
+                'recovery_days': recovery_days,
+                'max_drawdown_value': period_max_drawdown * 100,  # 转换为百分比
+                'recovery_start_index': drawdown_start_idx,
+                'recovery_end_index': i,
+                'recovery_start_date': None,
+                'recovery_end_date': None
+            }
+            
+            # 如果提供了日期列表，添加具体日期
+            if dates and len(dates) == len(cumulative_values):
+                if drawdown_start_idx < len(dates):
+                    period_info['recovery_start_date'] = dates[drawdown_start_idx]
+                if i < len(dates):
+                    period_info['recovery_end_date'] = dates[i]
+            
+            recovery_periods.append(period_info)
+    
+    # 处理到最后仍未恢复的回撤
+    if in_drawdown:
+        recovery_days = len(values) - 1 - drawdown_start_idx
+        period_drawdown = drawdown[drawdown_start_idx:]
+        period_max_drawdown = period_drawdown.min()
+        
+        period_info = {
+            'recovery_days': recovery_days,
+            'max_drawdown_value': period_max_drawdown * 100,  # 转换为百分比
+            'recovery_start_index': drawdown_start_idx,
+            'recovery_end_index': len(values) - 1,
+            'recovery_start_date': None,
+            'recovery_end_date': None
+        }
+        
+        # 如果提供了日期列表，添加具体日期
+        if dates and len(dates) == len(cumulative_values):
+            if drawdown_start_idx < len(dates):
+                period_info['recovery_start_date'] = dates[drawdown_start_idx]
+            period_info['recovery_end_date'] = dates[-1]  # 最后一个日期
+        
+        recovery_periods.append(period_info)
+    
+    # 按修复期长度降序排列
+    recovery_periods.sort(key=lambda x: x['recovery_days'], reverse=True)
+    
+    return recovery_periods

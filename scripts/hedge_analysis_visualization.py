@@ -39,7 +39,8 @@ from libs.returns_calculator import (
     calculate_cumulative_returns,
     calculate_annualized_return,
     calculate_sharpe_ratio,
-    calculate_max_drawdown
+    calculate_max_drawdown,
+    calculate_longest_drawdown_recovery_period
 )
 
 
@@ -362,6 +363,53 @@ class StatisticsCalculator:
         
         return max_drawdown, start_idx, max_dd_idx
     
+    def calculate_longest_recovery_period(self, cumulative_returns: List[float], dates: List[str] = None) -> Dict[str, any]:
+        """
+        计算最长回撤修复期
+        
+        Args:
+            cumulative_returns: 累积收益率列表（百分比形式）
+            dates: 日期列表（可选）
+            
+        Returns:
+            Dict: 包含最长修复期信息的字典
+        """
+        if not cumulative_returns:
+            return {
+                'longest_recovery_days': 0,
+                'max_drawdown_value': 0.0,
+                'recovery_start_date': '',
+                'recovery_end_date': '',
+                'recovery_start_index': -1,
+                'recovery_end_index': -1
+            }
+        
+        # 将累积收益率转换为累积值
+        cumulative_values = [100 + ret for ret in cumulative_returns]
+        
+        try:
+            # 调用returns_calculator中的函数
+            result = calculate_longest_drawdown_recovery_period(cumulative_values, dates)
+            
+            # 格式化日期
+            if result['recovery_start_date']:
+                result['recovery_start_date'] = self._format_date(result['recovery_start_date'])
+            if result['recovery_end_date']:
+                result['recovery_end_date'] = self._format_date(result['recovery_end_date'])
+            
+            return result
+            
+        except Exception as e:
+            print(f"警告: 计算最长回撤修复期失败: {e}")
+            return {
+                'longest_recovery_days': 0,
+                'max_drawdown_value': 0.0,
+                'recovery_start_date': '',
+                'recovery_end_date': '',
+                'recovery_start_index': -1,
+                'recovery_end_index': -1
+            }
+    
     def calculate_statistics(self, daily_returns: List[float], cumulative_returns: List[float], 
                            name: str, data_type: str, dates: List[str] = None) -> Dict[str, float]:
         """
@@ -419,6 +467,9 @@ class StatisticsCalculator:
         # 计算夏普比率
         sharpe_ratio = calculate_sharpe_ratio(daily_returns, start_date=start_date, end_date=end_date)
         
+        # 计算最长回撤修复期
+        recovery_info = self.calculate_longest_recovery_period(cumulative_returns, dates)
+        
         return {
             'name': name,
             'type': data_type,
@@ -428,7 +479,11 @@ class StatisticsCalculator:
             'max_drawdown_start_date': max_drawdown_start_date,
             'max_drawdown_end_date': max_drawdown_end_date,
             'sharpe_ratio': round(sharpe_ratio, 4),
-            'trading_days': len(daily_returns)
+            'trading_days': len(daily_returns),
+            'longest_recovery_days': recovery_info['longest_recovery_days'],
+            'recovery_max_drawdown': round(recovery_info['max_drawdown_value'], 2),
+            'recovery_start_date': recovery_info['recovery_start_date'],
+            'recovery_end_date': recovery_info['recovery_end_date']
         }
     
     def calculate_time_interval_statistics(self, daily_returns: List[float], cumulative_returns: List[float], 
@@ -472,7 +527,11 @@ class StatisticsCalculator:
                     'max_drawdown_start_date': '',
                     'max_drawdown_end_date': '',
                     'sharpe_ratio': 0.0,
-                    'trading_days': 0
+                    'trading_days': 0,
+                    'longest_recovery_days': 0,
+                    'recovery_max_drawdown': 0.0,
+                    'recovery_start_date': '',
+                    'recovery_end_date': ''
                 })
                 continue
             
@@ -502,6 +561,9 @@ class StatisticsCalculator:
                 print(f"警告: 计算最大回撤日期失败 {interval_name}: {e}")
                 max_drawdown_start_date, max_drawdown_end_date = '', ''
             
+            # 计算最长回撤修复期
+            recovery_info = self.calculate_longest_recovery_period(filtered_cumulative_returns, filtered_dates)
+            
             interval_statistics.append({
                 'name': f"{name}_{interval_name}",
                 'type': data_type,
@@ -512,7 +574,11 @@ class StatisticsCalculator:
                 'max_drawdown_start_date': self._format_date(max_drawdown_start_date),
                 'max_drawdown_end_date': self._format_date(max_drawdown_end_date),
                 'sharpe_ratio': round(float(sharpe_ratio), 4) if not isinstance(sharpe_ratio, complex) else 0.0,
-                'trading_days': len(filtered_daily_returns)
+                'trading_days': len(filtered_daily_returns),
+                'longest_recovery_days': recovery_info['longest_recovery_days'],
+                'recovery_max_drawdown': round(recovery_info['max_drawdown_value'], 2),
+                'recovery_start_date': recovery_info['recovery_start_date'],
+                'recovery_end_date': recovery_info['recovery_end_date']
             })
         
         return interval_statistics
@@ -685,7 +751,8 @@ class DebugDataExporter:
         with open(filepath, 'w', newline='', encoding='utf-8') as csvfile:
             fieldnames = ['name', 'type', 'total_return', 'annualized_return', 
                          'max_drawdown', 'max_drawdown_start_date', 'max_drawdown_end_date',
-                         'sharpe_ratio', 'trading_days']
+                         'sharpe_ratio', 'trading_days', 'longest_recovery_days',
+                         'recovery_max_drawdown', 'recovery_start_date', 'recovery_end_date']
             writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
             writer.writeheader()
             writer.writerows(statistics_list)
@@ -1188,7 +1255,8 @@ def main():
             with open(interval_stats_file, 'w', newline='', encoding='utf-8') as csvfile:
                 fieldnames = ['name', 'type', 'interval', 'total_return', 'annualized_return', 
                              'max_drawdown', 'max_drawdown_start_date', 'max_drawdown_end_date',
-                             'sharpe_ratio', 'trading_days']
+                             'sharpe_ratio', 'trading_days', 'longest_recovery_days',
+                             'recovery_max_drawdown', 'recovery_start_date', 'recovery_end_date']
                 writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
                 writer.writeheader()
                 writer.writerows(all_interval_statistics)

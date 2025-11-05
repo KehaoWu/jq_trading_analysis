@@ -251,6 +251,7 @@ def calculate_cumulative_returns(
         return_rate = daily_return / 100.0
         # 计算累积值
         new_value = cumulative_values[-1] * (1 + return_rate)
+        # print(return_rate, new_value)
         cumulative_values.append(new_value)
     
     cumulative_values = [value - initial_value for value in cumulative_values]

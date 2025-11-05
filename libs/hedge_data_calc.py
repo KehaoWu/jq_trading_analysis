@@ -102,22 +102,27 @@ def calculate_hedge_data(
     
     # 合并数据
     merged_df = pd.merge(backtest_df, index_df, on='date', how='inner', suffixes=('_backtest', '_index'))
-    
-    # 如果有持仓数据，则合并持仓数据
-    if position_data and 'balances' in position_data:
-        position_df = pd.DataFrame([
-            {
-                'date': parse_date_string(item.get('time', '').split(' ')[0]),
+
+    # 如果有持仓数据且包含 balances，则合并持仓数据；否则使用默认值
+    if position_data and isinstance(position_data, dict) and position_data.get('balances'):
+        position_records = []
+        for item in position_data.get('balances', []):
+            date_str = item.get('time', '').split(' ')[0]
+            date_val = parse_date_string(date_str)
+            if date_val is None:
+                continue
+            position_records.append({
+                'date': date_val,
                 'position_ratio': item.get('position_ratio', 0),
                 'cash': item.get('cash', 0),
                 'total_value': item.get('total_value', 0),
                 'net_value': item.get('net_value', 0)
-            }
-            for item in position_data.get('balances', [])
-        ])
-        merged_df = pd.merge(merged_df, position_df, on='date', how='left')
-        
-    
+            })
+        if position_records:
+            position_df = pd.DataFrame(position_records)
+            merged_df = pd.merge(merged_df, position_df, on='date', how='left')
+
+
     # 计算对冲收益率: 对冲日收益率 = 回测日收益率 - 回测持仓比例 * 指数收益率
     merged_df['hedge_return'] = merged_df['return_backtest'] - merged_df['position_ratio'] * merged_df['return_index']
     

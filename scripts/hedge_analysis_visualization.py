@@ -71,10 +71,28 @@ class BacktestFileIdentifier:
         """
         files_info = []
         
-        # 查找所有.jsonl文件（回测数据文件）
+        # 查找所有.jsonl文件（旧格式）与 *_daily_return_*.json（新格式）
         backtest_files = list(self.input_dir.glob("*.jsonl"))
+        backtest_files += list(self.input_dir.glob("*_daily_return_*.json"))
+
+        # 去重：同一回测ID只保留一个文件，优先使用新JSON格式
+        files_by_id = {}
+        for bf in sorted(backtest_files, key=lambda p: p.name):
+            backtest_id = self._extract_backtest_id(bf.name)
+            if not backtest_id:
+                continue
+            # 如果已有该ID的文件且当前是jsonl，而已有的是json，则跳过
+            prev = files_by_id.get(backtest_id)
+            if prev:
+                # 优先保留.json（新结果文件）
+                if prev.suffix == '.json':
+                    continue
+                if bf.suffix == '.json':
+                    files_by_id[backtest_id] = bf
+            else:
+                files_by_id[backtest_id] = bf
         
-        for backtest_file in backtest_files:
+        for backtest_file in files_by_id.values():
             # 从文件名中提取回测ID
             backtest_id = self._extract_backtest_id(backtest_file.name)
             backtest_name = self._extract_backtest_name(backtest_file.name)
@@ -116,10 +134,14 @@ class BacktestFileIdentifier:
             str: 回测名称
         """
         # 提取文件名中第一个下划线前的部分作为策略名称
-        parts = filename.split('_')
-        if len(parts) > 0:
-            return parts[0]
-        return filename.replace('.jsonl', '')
+        # 新旧格式文件名可能包含中文及多段前缀，策略名称取第一个下划线前的段
+        base = filename
+        if base.endswith('.jsonl'):
+            base = base[:-6]
+        elif base.endswith('.json'):
+            base = base[:-5]
+        parts = base.split('_')
+        return parts[0] if parts else base
     
     def _find_position_file(self, backtest_id: str) -> Optional[Path]:
         """
@@ -131,6 +153,15 @@ class BacktestFileIdentifier:
         Returns:
             Optional[Path]: 持仓比例文件路径，如果不存在则返回None
         """
+        # 支持带前缀的文件名，例如：<prefix>position_ratio_<id>.json
+        pattern = f"*position_ratio_{backtest_id}.json"
+        matches = sorted(self.input_dir.glob(pattern))
+        if matches:
+            # 返回匹配到的第一个文件（按文件名排序）
+            print(matches[0])
+            return matches[0]
+
+        # 兼容旧格式：无前缀文件名
         position_file = self.input_dir / f"position_ratio_{backtest_id}.json"
         print(position_file)
         return position_file if position_file.exists() else None
@@ -976,7 +1007,7 @@ def main():
     parser = argparse.ArgumentParser(description='对冲分析可视化脚本')
     parser.add_argument('--input_dir', required=True, help='回测数据目录路径')
     parser.add_argument('--index', required=True, help='指定的对冲指数名称（如：zz500）')
-    parser.add_argument('--output', default='hedge_analysis_visualization.html', help='输出HTML文件路径')
+    parser.add_argument('--output', default=None, help='输出HTML文件路径（默认在输出目录下生成 <输入目录名>_hedge_analysis_visualization.html）')
     parser.add_argument('--index_data_dir', default='index_data', help='指数数据目录路径')
     parser.add_argument('--debug', action='store_true', help='启用调试模式，输出中间数据到CSV文件')
     
@@ -996,12 +1027,20 @@ def main():
     input_folder_name = input_dir.name
     output_dir = project_root / 'output' / input_folder_name
     
-    output_file = Path(args.output)
-    if not output_file.is_absolute():
-        output_file = output_dir / output_file
+    # 计算默认输出文件名：<输入目录名>_hedge_analysis_visualization.html
+    default_output_name = f"{input_folder_name}_hedge_analysis_visualization.html"
+    
+    if args.output and str(args.output).strip():
+        # 用户指定了输出文件名，则遵循其命名，但仍落在对应输出子目录
+        provided = Path(args.output)
+        if not provided.is_absolute():
+            output_file = output_dir / provided
+        else:
+            # 如果用户提供了绝对路径，仍然使用对应的子文件夹结构
+            output_file = output_dir / provided.name
     else:
-        # 如果用户提供了绝对路径，仍然使用对应的子文件夹结构
-        output_file = output_dir / output_file.name
+        # 未指定时使用默认带前缀的文件名
+        output_file = output_dir / default_output_name
     
     # 确保输出目录存在
     output_file.parent.mkdir(parents=True, exist_ok=True)

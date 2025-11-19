@@ -277,7 +277,7 @@ def prepare_backtest_data_for_visualization(backtest_data: List[Dict]) -> Dict[s
     }
 
 
-def prepare_index_data_for_visualization(index_data: List[Dict]) -> Dict[str, List]:
+def prepare_index_data_for_visualization(index_data: List[Dict], start_date: Optional[str] = None) -> Dict[str, List]:
     """
     准备指数数据用于可视化
     
@@ -287,11 +287,23 @@ def prepare_index_data_for_visualization(index_data: List[Dict]) -> Dict[str, Li
     Returns:
         Dict: 包含日期、日收益率和累积收益率的字典
     """
+    def _fmt(date_str: str) -> str:
+        if not date_str:
+            return ''
+        if len(date_str) == 8 and date_str.isdigit():
+            return f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:8]}"
+        return date_str
+
+    start_date_fmt = _fmt(start_date) if start_date else None
+
     dates = []
     daily_returns = []
     
     for item in index_data:
-        dates.append(item.get('date', ''))
+        d = _fmt(item.get('date', ''))
+        if start_date_fmt and (not d or d < start_date_fmt):
+            continue
+        dates.append(d)
         daily_returns.append(item.get('pctChg', 0))
     
     # 计算累积收益率
@@ -303,17 +315,18 @@ def prepare_index_data_for_visualization(index_data: List[Dict]) -> Dict[str, Li
         else:
             filtered_returns.append(ret)
     
-    # 直接计算累积收益率（百分比形式）
     cumulative_returns = []
-    cumulative_value = 100.0  # 初始值
-    
+    cumulative_value = 1.0
+    first = True
     for daily_return in filtered_returns:
-        # 将百分比转换为小数进行计算
         return_rate = daily_return / 100.0
-        cumulative_value = cumulative_value * (1 + return_rate)
-        # 计算相对于初始值的收益率百分比
-        cumulative_return_percent = (cumulative_value - 100.0)
-        cumulative_returns.append(cumulative_return_percent)
+        if first:
+            cumulative_returns.append(0.0)
+            cumulative_value *= (1 + return_rate)
+            first = False
+        else:
+            cumulative_value *= (1 + return_rate)
+            cumulative_returns.append((cumulative_value - 1.0) * 100.0)
     
     return {
         'dates': dates,
@@ -1010,6 +1023,7 @@ def main():
     parser.add_argument('--output', default=None, help='输出HTML文件路径（默认在输出目录下生成 <输入目录名>_hedge_analysis_visualization.html）')
     parser.add_argument('--index_data_dir', default='index_data', help='指数数据目录路径')
     parser.add_argument('--debug', action='store_true', help='启用调试模式，输出中间数据到CSV文件')
+    parser.add_argument('--no_hedge', action='store_true', help='不绘制对冲曲线')
     
     args = parser.parse_args()
     
@@ -1080,6 +1094,7 @@ def main():
         
         # 4. 处理每个回测文件
         print("正在处理回测数据...")
+        earliest_backtest_start = None
         for file_info in files_info:
             print(f"处理: {file_info['backtest_name']}, {file_info['position_file']}")
             
@@ -1113,6 +1128,21 @@ def main():
                 backtest_viz_data['dates'],
                 backtest_viz_data['cumulative_returns']
             )
+
+            # 记录最早的回测起始日期(YYYY-MM-DD)
+            try:
+                bt_dates_fmt = []
+                for d in backtest_viz_data['dates']:
+                    if d and len(d) == 8 and d.isdigit():
+                        bt_dates_fmt.append(f"{d[:4]}-{d[4:6]}-{d[6:8]}")
+                    elif d:
+                        bt_dates_fmt.append(d)
+                if bt_dates_fmt:
+                    candidate = min(bt_dates_fmt)
+                    if earliest_backtest_start is None or candidate < earliest_backtest_start:
+                        earliest_backtest_start = candidate
+            except Exception:
+                pass
             
             # 计算对冲数据
             index_file = index_manager.get_index_file(args.index)
@@ -1166,12 +1196,12 @@ def main():
                     )
                     all_statistics.append(hedge_stats)
                     
-                    # 添加对冲数据到可视化
-                    visualizer.add_hedge_series(
-                        f"{file_info['backtest_name']}-{args.index}",
-                        hedge_dates,
-                        hedge_cumulative
-                    )
+                    if not args.no_hedge:
+                        visualizer.add_hedge_series(
+                            f"{file_info['backtest_name']}-{args.index}",
+                            hedge_dates,
+                            hedge_cumulative
+                        )
                     
                 except Exception as e:
                     traceback.print_exc()
@@ -1182,7 +1212,7 @@ def main():
         all_indices_data = index_manager.load_all_indices_data()
         
         for index_name, index_data in all_indices_data.items():
-            index_viz_data = prepare_index_data_for_visualization(index_data)
+            index_viz_data = prepare_index_data_for_visualization(index_data, start_date=earliest_backtest_start)
             
             # 调试输出：导出指数数据
             if debug_exporter:
@@ -1266,7 +1296,7 @@ def main():
         
         # 为指数数据计算时间区间统计指标
         for index_name, index_data in all_indices_data.items():
-            index_viz_data = prepare_index_data_for_visualization(index_data)
+            index_viz_data = prepare_index_data_for_visualization(index_data, start_date=earliest_backtest_start)
             
             index_interval_stats = stats_calculator.calculate_time_interval_statistics(
                 index_viz_data['daily_returns'],

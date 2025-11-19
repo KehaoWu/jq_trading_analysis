@@ -8,7 +8,9 @@
 - backtest_hedge_plot: 回测对冲数据计算和可视化
 - backtest_vis: 回测结果可视化
 - hedge_analysis_visualization: 对冲分析可视化（自动识别文件并生成完整分析）
+- position_ratio_visualization: 持仓比例可视化（绘制多个回测的持仓比例曲线）
 - cumulative_returns_comparison: 累积收益曲线对比分析
+- back_test_downloader: 从聚宽下载回测数据
 - cleanup: 清理项目中的临时文件和测试脚本
 
 使用方法:
@@ -25,7 +27,11 @@
     
     python main.py hedge_analysis_visualization --input_dir backtest_data/ex_tm1_top30 --index zz500
     
+    python main.py position_ratio_visualization --input_dir backtest_data/naive_top30_3800
+    
     python main.py cumulative_returns_comparison
+    
+    python main.py back_test_downloader
 """
 
 import os
@@ -78,7 +84,10 @@ def main():
         print("  combine_two_backtests - 合并两个不同时间段的回测数据")
         print("  backtest_hedge_plot - 回测对冲数据计算和可视化")
         print("  backtest_vis - 回测结果可视化")
+        print("  hedge_analysis_visualization - 对冲分析可视化（自动识别文件并生成完整分析）")
+        print("  position_ratio_visualization - 持仓比例可视化（绘制多个回测的持仓比例曲线）")
         print("  cumulative_returns_comparison - 累积收益曲线对比分析")
+        print("  back_test_downloader - 从聚宽下载回测数据")
         print("  cleanup - 清理项目中的临时文件和测试脚本")
         print("\n使用 'python main.py <功能名称> --help' 查看具体功能的详细帮助信息")
         return

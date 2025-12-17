@@ -1019,7 +1019,7 @@ def main():
     """主函数"""
     parser = argparse.ArgumentParser(description='对冲分析可视化脚本')
     parser.add_argument('--input_dir', required=True, help='回测数据目录路径')
-    parser.add_argument('--index', required=True, help='指定的对冲指数名称（如：zz500）')
+    parser.add_argument('--index', required=True, help='指定的对冲指数名称，支持多个指数用逗号分隔（如：zz500 或 zz500,hs300）')
     parser.add_argument('--output', default=None, help='输出HTML文件路径（默认在输出目录下生成 <输入目录名>_hedge_analysis_visualization.html）')
     parser.add_argument('--index_data_dir', default='index_data', help='指数数据目录路径')
     parser.add_argument('--debug', action='store_true', help='启用调试模式，输出中间数据到CSV文件')
@@ -1083,11 +1083,16 @@ def main():
         available_indices = index_manager.get_available_indices()
         print(f"可用指数: {', '.join(available_indices)}")
         
-        # 验证指定的指数是否存在
-        if args.index not in available_indices:
-            print(f"错误: 指定的指数 '{args.index}' 不存在")
-            print(f"可用指数: {', '.join(available_indices)}")
-            return
+        # 解析指定的指数列表（支持逗号分隔）
+        specified_indices = [idx.strip() for idx in args.index.split(',')]
+        print(f"指定的对冲指数: {', '.join(specified_indices)}")
+        
+        # 验证所有指定的指数是否存在
+        for idx in specified_indices:
+            if idx not in available_indices:
+                print(f"错误: 指定的指数 '{idx}' 不存在")
+                print(f"可用指数: {', '.join(available_indices)}")
+                return
         
         # 3. 初始化可视化器
         visualizer = EChartsVisualizer()
@@ -1144,68 +1149,69 @@ def main():
             except Exception:
                 pass
             
-            # 计算对冲数据
-            index_file = index_manager.get_index_file(args.index)
-            if index_file:
-                try:
-                    hedge_data = calculate_hedge_data(
-                        backtest_file=file_info['backtest_file'],
-                        position_file=file_info['position_file'],
-                        index_file=index_file
-                    )
-                    
-                    # 计算对冲累积收益率
-                    # hedge_return已经是百分比形式，不需要再乘以100
-                    hedge_returns = [item['hedge_return'] for item in hedge_data['data']]
-                    hedge_dates = [item['date'] for item in hedge_data['data']]
-                    
-                    # 直接计算累积收益率（百分比形式）
-                    hedge_cumulative = []
-                    cumulative_value = 100.0  # 初始值
-                    
-                    for daily_return in hedge_returns:
-                        # 将百分比转换为小数进行计算
-                        return_rate = daily_return / 100.0
-                        cumulative_value = cumulative_value * (1 + return_rate)
-                        # 计算相对于初始值的收益率百分比
-                        cumulative_return_percent = (cumulative_value - 100.0)
-                        hedge_cumulative.append(cumulative_return_percent)
-
-                    # 调试输出：导出对冲数据
-                    if debug_exporter:
-                        debug_exporter.export_hedge_data(
-                            file_info['backtest_name'], 
-                            hedge_data, 
-                            args.index
+            # 对每个指定的指数计算对冲数据
+            for index_name in specified_indices:
+                index_file = index_manager.get_index_file(index_name)
+                if index_file:
+                    try:
+                        hedge_data = calculate_hedge_data(
+                            backtest_file=file_info['backtest_file'],
+                            position_file=file_info['position_file'],
+                            index_file=index_file
                         )
-                        debug_exporter.export_cumulative_returns(
-                            file_info['backtest_name'],
-                            hedge_dates,
+                        
+                        # 计算对冲累积收益率
+                        # hedge_return已经是百分比形式，不需要再乘以100
+                        hedge_returns = [item['hedge_return'] for item in hedge_data['data']]
+                        hedge_dates = [item['date'] for item in hedge_data['data']]
+                        
+                        # 直接计算累积收益率（百分比形式）
+                        hedge_cumulative = []
+                        cumulative_value = 100.0  # 初始值
+                        
+                        for daily_return in hedge_returns:
+                            # 将百分比转换为小数进行计算
+                            return_rate = daily_return / 100.0
+                            cumulative_value = cumulative_value * (1 + return_rate)
+                            # 计算相对于初始值的收益率百分比
+                            cumulative_return_percent = (cumulative_value - 100.0)
+                            hedge_cumulative.append(cumulative_return_percent)
+
+                        # 调试输出：导出对冲数据
+                        if debug_exporter:
+                            debug_exporter.export_hedge_data(
+                                file_info['backtest_name'], 
+                                hedge_data, 
+                                index_name
+                            )
+                            debug_exporter.export_cumulative_returns(
+                                file_info['backtest_name'],
+                                hedge_dates,
+                                hedge_returns,
+                                hedge_cumulative,
+                                f"hedge_{index_name}"
+                            )
+                        
+                        # 计算对冲数据统计指标
+                        hedge_stats = stats_calculator.calculate_statistics(
                             hedge_returns,
                             hedge_cumulative,
-                            f"hedge_{args.index}"
+                            f"{file_info['backtest_name']}-{index_name}",
+                            'hedge',
+                            hedge_dates
                         )
-                    
-                    # 计算对冲数据统计指标
-                    hedge_stats = stats_calculator.calculate_statistics(
-                        hedge_returns,
-                        hedge_cumulative,
-                        f"{file_info['backtest_name']}-{args.index}",
-                        'hedge',
-                        hedge_dates
-                    )
-                    all_statistics.append(hedge_stats)
-                    
-                    if not args.no_hedge:
-                        visualizer.add_hedge_series(
-                            f"{file_info['backtest_name']}-{args.index}",
-                            hedge_dates,
-                            hedge_cumulative
-                        )
-                    
-                except Exception as e:
-                    traceback.print_exc()
-                    print(f"警告: 计算对冲数据失败 {file_info['backtest_name']}: {e}")
+                        all_statistics.append(hedge_stats)
+                        
+                        if not args.no_hedge:
+                            visualizer.add_hedge_series(
+                                f"{file_info['backtest_name']}-{index_name}",
+                                hedge_dates,
+                                hedge_cumulative
+                            )
+                        
+                    except Exception as e:
+                        traceback.print_exc()
+                        print(f"警告: 计算对冲数据失败 {file_info['backtest_name']}-{index_name}: {e}")
         
         # 5. 加载所有指数数据
         print("正在加载指数数据...")
@@ -1258,41 +1264,42 @@ def main():
             )
             all_interval_statistics.extend(interval_stats)
             
-            # 计算对冲数据的时间区间统计指标
-            index_file = index_manager.get_index_file(args.index)
-            if index_file:
-                try:
-                    hedge_data = calculate_hedge_data(
-                        backtest_file=file_info['backtest_file'],
-                        position_file=file_info['position_file'],
-                        index_file=index_file
-                    )
-                    
-                    hedge_returns = [item['hedge_return'] for item in hedge_data['data']]
-                    hedge_dates = [item['date'] for item in hedge_data['data']]
-                    
-                    # 计算对冲累积收益率
-                    hedge_cumulative = []
-                    cumulative_value = 100.0
-                    
-                    for daily_return in hedge_returns:
-                        return_rate = daily_return / 100.0
-                        cumulative_value = cumulative_value * (1 + return_rate)
-                        cumulative_return_percent = (cumulative_value - 100.0)
-                        hedge_cumulative.append(cumulative_return_percent)
-                    
-                    # 计算对冲数据的时间区间统计指标
-                    hedge_interval_stats = stats_calculator.calculate_time_interval_statistics(
-                        hedge_returns,
-                        hedge_cumulative,
-                        f"{file_info['backtest_name']}-{args.index}",
-                        'hedge',
-                        hedge_dates
-                    )
-                    all_interval_statistics.extend(hedge_interval_stats)
-                    
-                except Exception as e:
-                    print(f"警告: 计算对冲时间区间统计指标失败 {file_info['backtest_name']}: {e}")
+            # 对每个指定的指数计算对冲数据的时间区间统计指标
+            for index_name in specified_indices:
+                index_file = index_manager.get_index_file(index_name)
+                if index_file:
+                    try:
+                        hedge_data = calculate_hedge_data(
+                            backtest_file=file_info['backtest_file'],
+                            position_file=file_info['position_file'],
+                            index_file=index_file
+                        )
+                        
+                        hedge_returns = [item['hedge_return'] for item in hedge_data['data']]
+                        hedge_dates = [item['date'] for item in hedge_data['data']]
+                        
+                        # 计算对冲累积收益率
+                        hedge_cumulative = []
+                        cumulative_value = 100.0
+                        
+                        for daily_return in hedge_returns:
+                            return_rate = daily_return / 100.0
+                            cumulative_value = cumulative_value * (1 + return_rate)
+                            cumulative_return_percent = (cumulative_value - 100.0)
+                            hedge_cumulative.append(cumulative_return_percent)
+                        
+                        # 计算对冲数据的时间区间统计指标
+                        hedge_interval_stats = stats_calculator.calculate_time_interval_statistics(
+                            hedge_returns,
+                            hedge_cumulative,
+                            f"{file_info['backtest_name']}-{index_name}",
+                            'hedge',
+                            hedge_dates
+                        )
+                        all_interval_statistics.extend(hedge_interval_stats)
+                        
+                    except Exception as e:
+                        print(f"警告: 计算对冲时间区间统计指标失败 {file_info['backtest_name']}-{index_name}: {e}")
         
         # 为指数数据计算时间区间统计指标
         for index_name, index_data in all_indices_data.items():
@@ -1333,9 +1340,10 @@ def main():
         
         # 8. 生成可视化文件
         print("正在生成可视化文件...")
+        index_title = ','.join(specified_indices)
         visualizer.generate_html(
             str(output_file),
-            f"对冲分析可视化 - {args.index}"
+            f"对冲分析可视化 - {index_title}"
         )
         
         print("分析完成!")

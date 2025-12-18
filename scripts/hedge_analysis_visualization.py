@@ -482,13 +482,15 @@ class StatisticsCalculator:
                 'trading_days': 0
             }
         
-        # 计算区间收益率（总收益率）
-        total_return = cumulative_returns[-1] if cumulative_returns else 0.0
         
         # 获取开始和结束日期
         start_date = dates[0] if dates else None
         end_date = dates[-1] if dates else None
-        
+
+        # 计算区间收益率（总收益率）- 使用日收益率重新计算累积收益
+        cumulative_returns_calculated = calculate_cumulative_returns(daily_returns)
+        total_return = cumulative_returns_calculated[-1] if cumulative_returns_calculated else 0.0
+
         # 计算年化收益率
         annualized_return = calculate_annualized_return(daily_returns, start_date=start_date, end_date=end_date)
         
@@ -579,15 +581,27 @@ class StatisticsCalculator:
                 })
                 continue
             
+            # 重新计算该区间的累积收益率（以区间起点为基准）
+            # 将过滤后的日收益率重新累积，从0开始
+            interval_cumulative_returns = []
+            cumulative_value = 100.0  # 初始值
+            
+            for daily_return in filtered_daily_returns:
+                # 将百分比转换为小数进行计算
+                return_rate = daily_return / 100.0
+                cumulative_value = cumulative_value * (1 + return_rate)
+                # 计算相对于初始值的收益率百分比
+                cumulative_return_percent = (cumulative_value - 100.0)
+                interval_cumulative_returns.append(cumulative_return_percent)
+            
             # 计算区间收益率（总收益率）
-            total_return = filtered_cumulative_returns[-1] if filtered_cumulative_returns else 0.0
+            total_return = interval_cumulative_returns[-1] if interval_cumulative_returns else 0.0
             
             # 获取开始和结束日期
             start_date = filtered_dates[0] if filtered_dates else None
             end_date = filtered_dates[-1] if filtered_dates else None
             
             # 计算年化收益率
-            print(len(filtered_cumulative_returns), start_date, end_date)
             annualized_return = calculate_annualized_return(filtered_daily_returns, start_date=start_date, end_date=end_date)
             
             # 计算夏普比率
@@ -949,7 +963,13 @@ class EChartsVisualizer:
             tooltip: {{
                 trigger: 'axis',
                 formatter: function(params) {{
-                    var result = params[0].axisValue + '<br/>';
+                    // 格式化日期
+                    var date = new Date(params[0].axisValue);
+                    var dateStr = date.getFullYear() + '-' + 
+                                 String(date.getMonth() + 1).padStart(2, '0') + '-' + 
+                                 String(date.getDate()).padStart(2, '0');
+                    
+                    var result = dateStr + '<br/>';
                     params.forEach(function(item) {{
                         result += item.marker + item.seriesName + ': ' + item.value[1].toFixed(2) + '%<br/>';
                     }});

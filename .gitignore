@@ -11,3 +11,7 @@ wheels/
 
 backtest_data
 hedge_data
+output
+data
+index_data
+index_constituents_data

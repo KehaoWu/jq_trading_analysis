@@ -125,21 +125,35 @@ class BacktestFileIdentifier:
     
     def _extract_backtest_name(self, filename: str) -> str:
         """
-        从文件名中提取回测名称
+        从文件名中提取回测名称（策略名称）
+        
+        文件名格式：[strategy_name]_[startdate]-[stopdate]_[initial_cash]_[filetype]_[hash_id].[extension]
+        例如：S5-5_HP5-LR0.12_200901-202507_1000M_position_ratio_cdf0e823f7e904dfd3c5f28f88912cc6.json
         
         Args:
             filename: 文件名
             
         Returns:
-            str: 回测名称
+            str: 回测名称（策略名称）
         """
-        # 提取文件名中第一个下划线前的部分作为策略名称
-        # 新旧格式文件名可能包含中文及多段前缀，策略名称取第一个下划线前的段
+        # 移除文件扩展名
         base = filename
         if base.endswith('.jsonl'):
             base = base[:-6]
         elif base.endswith('.json'):
             base = base[:-5]
+        
+        # 尝试匹配日期范围模式：_YYMMDD-YYMMDD_ 或 _YYYYMM-YYYYMM_ 或 _YYYYMMDD-YYYYMMDD_
+        # 日期范围格式：6位或8位数字-6位或8位数字
+        date_range_pattern = r'_(\d{6,8})-(\d{6,8})_'
+        match = re.search(date_range_pattern, base)
+        
+        if match:
+            # 策略名称是日期范围之前的部分
+            strategy_name = base[:match.start()]
+            return strategy_name
+        
+        # 如果没有匹配到日期范围，回退到旧的逻辑（取第一个下划线前的部分）
         parts = base.split('_')
         return parts[0] if parts else base
     
